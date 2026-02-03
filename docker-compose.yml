@@ -1,0 +1,17 @@
+# Production-ready compose for elaas-backend.
+# Add services (e.g. Kafka) under services: as needed.
+services:
+  app:
+    image: elaas-backend:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    env_file:
+      - .env
+    # Optional: override env in compose for non-secret values
+    # environment:
+    #   - LOG_LEVEL=INFO
+    #   - ENVIRONMENT=production

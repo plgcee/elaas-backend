@@ -1,0 +1,15 @@
+fastapi==0.128.0
+uvicorn[standard]
+gunicorn
+python-dotenv
+supabase
+kafka-python
+pydantic
+pydantic-settings
+python-multipart
+email-validator
+boto3
+python-hcl2
+slowapi
+# Note: Terraform binary must be installed separately
+# Install from: https://www.terraform.io/downloads
