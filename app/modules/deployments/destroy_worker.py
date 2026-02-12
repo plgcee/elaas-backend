@@ -90,6 +90,14 @@ def destroy_workshop_async(
             if time.monotonic() - last_flush_time[0] >= LOG_FLUSH_INTERVAL_SEC:
                 _flush_logs()
 
+        # Use workshop terraform_vars so destroy has required variable values (e.g. instance_identifier)
+        if getattr(workshop, "template_group_id", None):
+            vars_for_destroy = (workshop.terraform_vars or {}).get(template_id) if isinstance(workshop.terraform_vars, dict) else {}
+        else:
+            vars_for_destroy = getattr(workshop, "terraform_vars", None) or {}
+        if not isinstance(vars_for_destroy, dict):
+            vars_for_destroy = {}
+
         # Destroy Terraform infrastructure
         try:
             result = deployer.destroy(
@@ -97,6 +105,7 @@ def destroy_workshop_async(
                 workshop_id=workshop_id,
                 template_id=template_id,
                 template_name=template.name,
+                terraform_vars=vars_for_destroy,
                 log_callback=log_callback
             )
         finally:

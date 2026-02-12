@@ -573,6 +573,7 @@ class TerraformDeployer:
         workshop_id: str,
         template_id: str,
         template_name: str,
+        terraform_vars: Optional[Dict[str, Any]] = None,
         log_callback: Optional[callable] = None
     ) -> Dict[str, Any]:
         """
@@ -583,6 +584,7 @@ class TerraformDeployer:
             workshop_id: Workshop ID for state file management
             template_id: Template ID (same key as deploy so we target the same state)
             template_name: Template name to use as subdirectory name
+            terraform_vars: Same vars used at deploy time (required so Terraform can evaluate the config)
             log_callback: Optional callback function to receive log lines
 
         Returns:
@@ -617,6 +619,10 @@ class TerraformDeployer:
             
             # Initialize Terraform backend with existing state
             self._init_backend(terraform_dir, state_key, log_callback)
+
+            # Write tfvars so destroy can evaluate required variables (e.g. RDS instance_identifier)
+            tf_vars = self._prepare_variables(terraform_vars or {})
+            self._create_tfvars(terraform_dir, tf_vars)
             
             # Destroy Terraform infrastructure
             output = self._destroy_terraform(terraform_dir, log_callback)
@@ -650,10 +656,10 @@ class TerraformDeployer:
         """Destroy Terraform configuration using existing state"""
         env = self._get_terraform_env()
         
-        # Run terraform destroy
+        # Run terraform destroy with same var file as apply (required variables must be set)
         try:
             result = subprocess.run(
-                ['terraform', 'destroy', '-auto-approve'],
+                ['terraform', 'destroy', '-auto-approve', '-var-file', 'terraform.tfvars.json'],
                 cwd=terraform_dir,
                 capture_output=True,
                 text=True,
