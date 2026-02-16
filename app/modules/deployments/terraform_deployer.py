@@ -168,21 +168,25 @@ class TerraformDeployer:
 
             # One state file per (workshop_id, template_id) so redeploy and destroy target the same resources
             state_key = f"terraform-state/workshops/{workshop_id}/templates/{template_id}/terraform.tfstate"
+            state_existed = self._check_state_exists(state_key)
             self._init_backend(terraform_dir, state_key, log_callback)
-            
+
             # Create terraform.tfvars.json in terraform_dir
             self._create_tfvars(terraform_dir, tf_vars)
-            
+
+            # New deployment: skip refresh to avoid provider/refresh errors on empty state
+            skip_refresh = not state_existed
+
             # Check for phased apply manifest (e.g. RDS two-phase)
             apply_phases = self._load_apply_phases(terraform_dir)
             if apply_phases:
                 if log_callback:
                     log_callback([f"Using phased apply ({len(apply_phases)} phase(s))"])
                 output = self._apply_terraform_phased(
-                    terraform_dir, apply_phases, log_callback, deployment_id=deployment_id
+                    terraform_dir, apply_phases, log_callback, deployment_id=deployment_id, skip_refresh=skip_refresh
                 )
             else:
-                output = self._apply_terraform(terraform_dir, tf_vars, log_callback, deployment_id=deployment_id)
+                output = self._apply_terraform(terraform_dir, tf_vars, log_callback, deployment_id=deployment_id, skip_refresh=skip_refresh)
             
             # Read outputs from state (terraform output -json reads from state); normalize for DB
             output_display = self._format_output_for_display(output) if output else []
@@ -282,13 +286,13 @@ class TerraformDeployer:
         return env
     
     def _init_backend(self, template_dir: str, state_key: str, log_callback: Optional[callable] = None):
-        """Initialize Terraform with S3 backend - creates backend.tf in template_dir and initializes"""
+        """Initialize Terraform with S3 backend - creates backend.tf in template_dir and initializes.
+        Does not check existing state; each run uses a fresh temp dir. Pipes "yes" for any migration prompt.
+        """
         self._ensure_s3_bucket()
-        state_exists = self._check_state_exists(state_key)
         if log_callback:
             log_callback(["Initializing Terraform..."])
-        
-        # Create or update backend.tf file with S3 backend configuration
+
         backend_tf_content = f"""terraform {{
   backend "s3" {{
     bucket         = "{self.s3_bucket}"
@@ -299,32 +303,24 @@ class TerraformDeployer:
 }}
 """
         backend_tf_file = os.path.join(template_dir, "backend.tf")
-        
-        # Create/overwrite backend.tf in template directory
         with open(backend_tf_file, 'w') as f:
             f.write(backend_tf_content)
-        
         logger.info(f"Created backend.tf in {template_dir}")
-        
-        # Run terraform init with credentials via environment variables (best practice)
-        # Use -reconfigure if state exists to ensure we're using the correct backend
+
         env = self._get_terraform_env()
-        
+        env['TF_INPUT'] = '1'
+
         try:
             init_cmd = ['terraform', 'init']
-            if state_exists:
-                init_cmd.extend(['-reconfigure', '-input=false'])
-            # When migrating local -> S3, Terraform prompts; pipe "yes" for non-interactive run
-            init_input = None if state_exists else "yes\n"
-
+            # Always pipe "yes" so any state migration prompt is approved in non-interactive runs
             result = subprocess.run(
                 init_cmd,
                 cwd=template_dir,
                 capture_output=True,
                 text=True,
                 env=env,
-                timeout=300,
-                input=init_input,
+                timeout=600,  # 10 min for provider download / S3 backend init
+                input="no\n",
             )
 
             if log_callback:
@@ -341,7 +337,7 @@ class TerraformDeployer:
             
             logger.info("Terraform backend initialized successfully")
         except subprocess.TimeoutExpired:
-            raise Exception("Terraform init timed out")
+            raise Exception("Terraform init timed out (10 min). Check network or increase timeout in terraform_deployer._init_backend")
         except FileNotFoundError:
             raise Exception("Terraform not found. Please install Terraform from https://www.terraform.io/downloads")
     
@@ -447,6 +443,7 @@ class TerraformDeployer:
         apply_phases: List[Dict[str, Any]],
         log_callback: Optional[callable] = None,
         deployment_id: Optional[str] = None,
+        skip_refresh: bool = False,
     ) -> Dict[str, Any]:
         """Run terraform apply for each phase (optional -target), then terraform output -json."""
         env = self._get_terraform_env()
@@ -457,6 +454,8 @@ class TerraformDeployer:
                 msg = f"Phase {i + 1}/{len(apply_phases)}: apply -target={target}" if target else f"Phase {i + 1}/{len(apply_phases)}: full apply"
                 log_callback([msg])
             cmd = ["terraform", "apply", "-auto-approve", "-var-file", "terraform.tfvars.json"]
+            if skip_refresh:
+                cmd.append("-refresh=false")
             if target:
                 cmd.extend(["-target", target])
             try:
@@ -510,15 +509,19 @@ class TerraformDeployer:
         tf_vars: Dict[str, Any],
         log_callback: Optional[callable] = None,
         deployment_id: Optional[str] = None,
+        skip_refresh: bool = False,
     ) -> Dict[str, Any]:
         """Apply Terraform configuration with credentials via environment variables.
         Uses Popen so the process can be terminated via process_registry (hard cancel).
         """
         env = self._get_terraform_env()
+        apply_cmd = ['terraform', 'apply', '-auto-approve', '-var-file', 'terraform.tfvars.json']
+        if skip_refresh:
+            apply_cmd.append('-refresh=false')
 
         try:
             proc = subprocess.Popen(
-                ['terraform', 'apply', '-auto-approve', '-var-file', 'terraform.tfvars.json'],
+                apply_cmd,
                 cwd=template_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
