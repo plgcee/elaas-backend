@@ -313,17 +313,20 @@ class TerraformDeployer:
         try:
             init_cmd = ['terraform', 'init']
             if state_exists:
-                init_cmd.append('-reconfigure')
-            
+                init_cmd.extend(['-reconfigure', '-input=false'])
+            # When migrating local -> S3, Terraform prompts; pipe "yes" for non-interactive run
+            init_input = None if state_exists else "yes\n"
+
             result = subprocess.run(
                 init_cmd,
                 cwd=template_dir,
                 capture_output=True,
                 text=True,
                 env=env,
-                timeout=300
+                timeout=300,
+                input=init_input,
             )
-            
+
             if log_callback:
                 for line in (result.stdout or "").splitlines():
                     if line.strip():
