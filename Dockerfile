@@ -24,4 +24,5 @@ COPY app/ ./app/
 EXPOSE 8080
 
 # Production: gunicorn + uvicorn workers. Dev/local can override with uvicorn.
-CMD ["sh", "-c", "gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT} --access-logfile - --capture-output"]
+# On t3.medium (4GB): use 2 workers to avoid OOM; increase timeout for slow requests
+CMD ["sh", "-c", "gunicorn app.main:app -w 2 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT} --timeout 120 --graceful-timeout 30 --access-logfile - --capture-output"]
