@@ -125,7 +125,8 @@ class TerraformDeployer:
         workshop_id: str,
         template_id: str,
         template_name: str,
-        log_callback: Optional[callable] = None
+        log_callback: Optional[callable] = None,
+        deployed_by: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Deploy Terraform infrastructure asynchronously.
@@ -138,6 +139,7 @@ class TerraformDeployer:
             template_id: Template ID for per-template state (one state per workshop+template)
             template_name: Template name to use as subdirectory name
             log_callback: Optional callback function to receive log lines
+            deployed_by: User identity for audit tag (e.g. email or user_id)
 
         Returns:
             Dict with 'success' (bool), 'output' (dict), and 'error' (str)
@@ -165,6 +167,7 @@ class TerraformDeployer:
 
             # Prepare Terraform variables with AWS credentials from backend
             tf_vars = self._prepare_variables(terraform_vars)
+            tf_vars["elaas_deployed_by"] = deployed_by or "unknown"
 
             # One state file per (workshop_id, template_id) so redeploy and destroy target the same resources
             state_key = f"terraform-state/workshops/{workshop_id}/templates/{template_id}/terraform.tfstate"

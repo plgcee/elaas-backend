@@ -14,6 +14,17 @@ from supabase import Client
 logger = logging.getLogger(__name__)
 
 
+def _resolve_deployed_by(client: Client, user_id: str) -> str:
+    """Resolve user_id to email for audit tag; fallback to user_id if missing."""
+    try:
+        result = client.table("user_profiles").select("email").eq("id", user_id).maybe_single().execute()
+        if result.data and result.data.get("email"):
+            return result.data["email"]
+    except Exception as e:
+        logger.warning(f"Could not resolve user_profiles for {user_id}: {e}")
+    return str(user_id)
+
+
 def deploy_workshop_async(
     deployment_id: str,
     workshop_id: str,
@@ -35,6 +46,9 @@ def deploy_workshop_async(
         deployment = deployment_service.get_deployment_by_id(deployment_id)
         if deployment.status == "cancelled":
             return
+
+        # Resolve deployer identity for audit tag (email or user_id)
+        deployed_by = _resolve_deployed_by(client, deployment.user_id)
 
         # Get template to retrieve environment
         template = template_service.get_template_by_id(template_id)
@@ -89,7 +103,8 @@ def deploy_workshop_async(
                 workshop_id=workshop_id,
                 template_id=template_id,
                 template_name=template.name,
-                log_callback=log_callback
+                log_callback=log_callback,
+                deployed_by=deployed_by,
             )
         finally:
             _flush_logs()
