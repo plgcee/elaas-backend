@@ -1,7 +1,7 @@
 import threading
 import time
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 LOG_FLUSH_INTERVAL_SEC = 30
 from app.modules.deployments.terraform_deployer import TerraformDeployer
@@ -30,7 +30,7 @@ def deploy_workshop_async(
     workshop_id: str,
     template_id: str,
     terraform_vars: Dict[str, Any],
-    supabase: Client
+    supabase: Optional[Client] = None,
 ):
     """
     Asynchronous deployment worker function.

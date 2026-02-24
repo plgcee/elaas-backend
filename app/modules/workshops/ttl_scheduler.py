@@ -1,79 +1,92 @@
 import asyncio
 import logging
+from app.config import settings
 from app.database.supabase_client import get_supabase
 from app.modules.workshops.service import WorkshopService
-from app.modules.deployments.destroy_worker import destroy_workshop_async
+from app.modules.workshops.schemas import WorkshopResponse
+from app.modules.deployments.executor import submit_destroy
 from app.modules.deployments.service import DeploymentService
+from app.modules.environments.service import EnvironmentService
 
 logger = logging.getLogger(__name__)
 
 
+def _enqueue_destroys_for_workshop(workshop, workshop_service: WorkshopService, deployment_service: DeploymentService):
+    """Set workshop to destroying and submit destroy jobs via bounded executor."""
+    workshop_service.update_workshop_status(workshop.id, "destroying")
+    deployments = deployment_service.list_deployments_by_workshop(workshop.id)
+    eligible = [d for d in deployments if d.status in ("deployed", "failed")]
+    if getattr(workshop, "template_group_id", None):
+        seen_templates = set()
+        to_destroy = []
+        for d in eligible:
+            if d.template_id not in seen_templates:
+                seen_templates.add(d.template_id)
+                to_destroy.append(d)
+        for deployment in to_destroy:
+            submit_destroy(workshop_id=workshop.id, template_id=deployment.template_id, deployment_id=deployment.id)
+    else:
+        if eligible:
+            deployment = eligible[0]
+            submit_destroy(workshop_id=workshop.id, template_id=deployment.template_id, deployment_id=deployment.id)
+        else:
+            template_id = getattr(workshop, "template_id", None)
+            if template_id:
+                submit_destroy(workshop_id=workshop.id, template_id=template_id)
+
+
 async def check_and_destroy_expired_workshops():
-    """Check for expired workshops and destroy them (single-template or template-group)."""
+    """Check for expired workshops and expired environments; enqueue destroy jobs (non-blocking)."""
     try:
         supabase = get_supabase()
         workshop_service = WorkshopService(supabase)
         deployment_service = DeploymentService(supabase)
+        environment_service = EnvironmentService(supabase)
+
+        # 1) Expired workshops (workshop-level TTL)
         expired_workshops = workshop_service.get_expired_workshops()
-        if not expired_workshops:
-            logger.debug("No expired workshops found")
-            return
-        logger.info(f"Found {len(expired_workshops)} expired workshop(s) to destroy")
+        if expired_workshops:
+            logger.info("Found %s expired workshop(s) to destroy", len(expired_workshops))
         for workshop in expired_workshops:
             try:
-                logger.info(f"Auto-destroying expired workshop: {workshop.id} (expired at {workshop.expires_at})")
-                workshop_service.update_workshop_status(workshop.id, "destroying")
-                # One state per (workshop_id, template_id): destroy latest deployment per template only
-                deployments = deployment_service.list_deployments_by_workshop(workshop.id)
-                eligible = [d for d in deployments if d.status in ("deployed", "failed")]
-                if getattr(workshop, "template_group_id", None):
-                    seen_templates = set()
-                    to_destroy = []
-                    for d in eligible:
-                        if d.template_id not in seen_templates:
-                            seen_templates.add(d.template_id)
-                            to_destroy.append(d)
-                    for deployment in to_destroy:
-                        destroy_workshop_async(
-                            workshop_id=workshop.id,
-                            template_id=deployment.template_id,
-                            supabase=supabase,
-                            deployment_id=deployment.id,
-                        )
-                else:
-                    if eligible:
-                        deployment = eligible[0]
-                        destroy_workshop_async(
-                            workshop_id=workshop.id,
-                            template_id=deployment.template_id,
-                            supabase=supabase,
-                            deployment_id=deployment.id,
-                        )
-                    else:
-                        template_id = getattr(workshop, "template_id", None)
-                        if template_id:
-                            destroy_workshop_async(
-                                workshop_id=workshop.id,
-                                template_id=template_id,
-                                supabase=supabase,
-                            )
+                logger.info("Auto-destroying expired workshop: %s (expired at %s)", workshop.id, workshop.expires_at)
+                _enqueue_destroys_for_workshop(workshop, workshop_service, deployment_service)
             except Exception as e:
-                logger.error(f"Error auto-destroying workshop {workshop.id}: {str(e)}")
+                logger.error("Error auto-destroying workshop %s: %s", workshop.id, e)
                 try:
                     workshop_service.update_workshop_status(workshop.id, "failed")
                 except Exception:
                     pass
+
+        # 2) Expired environments (environment-level TTL): destroy all workshops in env
+        expired_envs = environment_service.get_expired_environments()
+        if expired_envs:
+            logger.info("Found %s expired environment(s) to destroy", len(expired_envs))
+        for env in expired_envs:
+            try:
+                workshops_data = environment_service.get_workshops_for_ttl_destroy(env.id)
+                for w in workshops_data:
+                    workshop = WorkshopResponse(**w)
+                    try:
+                        logger.info("Auto-destroying workshop %s (environment %s TTL reached)", workshop.id, env.id)
+                        _enqueue_destroys_for_workshop(workshop, workshop_service, deployment_service)
+                    except Exception as e:
+                        logger.error("Error auto-destroying workshop %s for env TTL: %s", workshop.id, e)
+                        try:
+                            workshop_service.update_workshop_status(workshop.id, "failed")
+                        except Exception:
+                            pass
+            except Exception as e:
+                logger.error("Error processing expired environment %s: %s", env.id, e)
     except Exception as e:
-        logger.error(f"Error in TTL scheduler: {str(e)}")
+        logger.error("Error in TTL scheduler: %s", e)
 
 
 async def ttl_scheduler_loop():
-    """Background task that periodically checks for expired workshops"""
+    """Background task that periodically checks for expired workshops and environments."""
     while True:
         try:
             await check_and_destroy_expired_workshops()
         except Exception as e:
-            logger.error(f"Error in TTL scheduler loop: {str(e)}")
-        
-        # Check every 5 minutes
-        await asyncio.sleep(300)
+            logger.error("Error in TTL scheduler loop: %s", e)
+        await asyncio.sleep(settings.ttl_check_interval_seconds)

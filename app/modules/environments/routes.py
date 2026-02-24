@@ -30,15 +30,17 @@ async def list_environments(
     group_id: Optional[str] = None,
     limit: int = 10,
     offset: int = 0,
+    include_workshop_counts: bool = False,
     user_data: Dict = Depends(require_permission("environments:read")),
     service: EnvironmentService = Depends(get_environment_service)
 ):
-    """List environments for user's groups (requires environments:read permission)"""
+    """List environments for user's groups (requires environments:read permission). Optionally include workshop count per environment."""
     return service.list_environments(
         user_id=user_data["id"],
         group_id=group_id,
         limit=limit,
-        offset=offset
+        offset=offset,
+        include_workshop_counts=include_workshop_counts,
     )
 
 

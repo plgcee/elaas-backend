@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173"
     rate_limit: str = "100/minute"  # slowapi format, e.g. "100/minute"
 
+    # Background workers: bounded concurrency for deploy/destroy
+    max_concurrent_destroy: int = 5
+    max_concurrent_deploy: int = 10
+    ttl_check_interval_seconds: int = 300
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"

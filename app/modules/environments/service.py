@@ -1,8 +1,10 @@
+from datetime import datetime, timedelta
 from supabase import Client
 from app.modules.environments.schemas import (
     EnvironmentCreate, EnvironmentUpdate, EnvironmentResponse, EnvironmentWithWorkshopsResponse
 )
 from typing import List, Optional
+from collections import Counter
 from fastapi import HTTPException
 
 
@@ -37,12 +39,16 @@ class EnvironmentService:
                 )
             
             # Create environment
-            result = self.supabase.table("environments").insert({
+            insert_data = {
                 "name": environment_data.name,
                 "description": environment_data.description,
                 "group_id": environment_data.group_id,
-                "user_id": user_id
-            }).execute()
+                "user_id": user_id,
+            }
+            if environment_data.ttl_hours is not None:
+                insert_data["ttl_hours"] = environment_data.ttl_hours
+                insert_data["expires_at"] = (datetime.utcnow() + timedelta(hours=environment_data.ttl_hours)).isoformat()
+            result = self.supabase.table("environments").insert(insert_data).execute()
             
             if not result.data:
                 raise HTTPException(status_code=500, detail="Failed to create environment")
@@ -79,7 +85,10 @@ class EnvironmentService:
                 update_data["name"] = environment_data.name
             if environment_data.description is not None:
                 update_data["description"] = environment_data.description
-            
+            if environment_data.ttl_hours is not None:
+                update_data["ttl_hours"] = environment_data.ttl_hours
+                update_data["expires_at"] = (datetime.utcnow() + timedelta(hours=environment_data.ttl_hours)).isoformat()
+
             if not update_data:
                 # No changes, return existing
                 return self.get_environment_by_id(environment_id)
@@ -100,8 +109,15 @@ class EnvironmentService:
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     
-    def list_environments(self, user_id: str, group_id: Optional[str] = None, limit: int = 10, offset: int = 0) -> List[EnvironmentResponse]:
-        """List environments for user's groups"""
+    def list_environments(
+        self,
+        user_id: str,
+        group_id: Optional[str] = None,
+        limit: int = 10,
+        offset: int = 0,
+        include_workshop_counts: bool = False,
+    ) -> List[EnvironmentResponse]:
+        """List environments for user's groups. Optionally include workshop count per environment."""
         try:
             # Get user's group memberships
             groups_result = self.supabase.table("group_members")\
@@ -133,7 +149,20 @@ class EnvironmentService:
                 .offset(offset)\
                 .execute()
             
-            return [EnvironmentResponse(**env) for env in result.data]
+            if include_workshop_counts and result.data:
+                env_ids = [e["id"] for e in result.data]
+                workshops_result = self.supabase.table("workshops")\
+                    .select("environment_id")\
+                    .in_("environment_id", env_ids)\
+                    .execute()
+                counts = Counter(w["environment_id"] for w in (workshops_result.data or []))
+                env_list = [
+                    EnvironmentResponse(workshop_count=counts.get(env["id"], 0), **env)
+                    for env in result.data
+                ]
+            else:
+                env_list = [EnvironmentResponse(**env) for env in result.data]
+            return env_list
         except HTTPException:
             raise
         except Exception as e:
@@ -151,6 +180,25 @@ class EnvironmentService:
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     
+    def get_expired_environments(self) -> List[EnvironmentResponse]:
+        """Return environments whose expires_at has passed (TTL reached)."""
+        try:
+            now = datetime.utcnow().isoformat()
+            result = self.supabase.table("environments").select("*").lt("expires_at", now).not_.is_("expires_at", "null").execute()
+            if not result.data:
+                return []
+            return [EnvironmentResponse(**row) for row in result.data]
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    def get_workshops_for_ttl_destroy(self, environment_id: str) -> List[dict]:
+        """Return workshops in this environment with status deployed or failed (for env TTL destroy)."""
+        try:
+            result = self.supabase.table("workshops").select("*").eq("environment_id", environment_id).in_("status", ["deployed", "failed"]).execute()
+            return result.data or []
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
     def get_environment_with_workshops(self, environment_id: str) -> EnvironmentWithWorkshopsResponse:
         """Get environment with nested workshops"""
         try:

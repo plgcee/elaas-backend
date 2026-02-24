@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from app.database.supabase_client import get_supabase
 from app.modules.deployments.schemas import DeploymentResponse, DeploymentLogsResponse
 from app.modules.deployments.service import DeploymentService
-from app.modules.deployments.destroy_worker import destroy_workshop_async
+from app.modules.deployments.executor import submit_destroy
 from app.modules.deployments import process_registry
 from app.modules.workshops.service import WorkshopService
 from app.modules.templates.service import TemplateService
@@ -93,7 +93,6 @@ async def cancel_deployment(
 @router.post("/workshop/{workshop_id}/destroy", response_model=DeploymentResponse, status_code=201)
 async def destroy_workshop(
     workshop_id: str,
-    background_tasks: BackgroundTasks,
     user_data: Dict = Depends(require_permission("workshops:destroy")),
     workshop_service: WorkshopService = Depends(get_workshop_service),
     template_service: TemplateService = Depends(get_template_service),
@@ -138,8 +137,7 @@ async def destroy_workshop(
             )
             deployment = deployment_service.create_deployment(deployment_data, user_data["id"])
             created.append(deployment)
-            background_tasks.add_task(
-                destroy_workshop_async,
+            submit_destroy(
                 workshop_id=workshop_id,
                 template_id=template_id,
                 supabase=supabase,
@@ -164,8 +162,7 @@ async def destroy_workshop(
         )
         deployment = deployment_service.create_deployment(deployment_data, user_data["id"])
         workshop_service.update_workshop_status(workshop_id, "destroying")
-        background_tasks.add_task(
-            destroy_workshop_async,
+        submit_destroy(
             workshop_id=workshop_id,
             template_id=template_id,
             supabase=supabase,

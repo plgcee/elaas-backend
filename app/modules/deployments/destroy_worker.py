@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 def destroy_workshop_async(
     workshop_id: str,
     template_id: str,
-    supabase: Client,
+    supabase: Optional[Client] = None,
     deployment_id: Optional[str] = None
 ):
     """
