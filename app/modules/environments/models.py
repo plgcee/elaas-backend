@@ -11,5 +11,7 @@ Expected Supabase table structure:
 - user_id: uuid (foreign key to users.id, not null) - creator/owner
 - created_at: timestamp (default: now())
 - updated_at: timestamp (nullable)
+- ttl_hours: integer (nullable) - when set, environment and its workshops are destroyed at expires_at
+- expires_at: timestamptz (nullable)
 - unique constraint on (name, group_id)
 """

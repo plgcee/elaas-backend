@@ -7,11 +7,13 @@ class EnvironmentCreate(BaseModel):
     name: str
     description: Optional[str] = None
     group_id: str
+    ttl_hours: Optional[int] = None
 
 
 class EnvironmentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    ttl_hours: Optional[int] = None
 
 
 class EnvironmentResponse(BaseModel):
@@ -22,7 +24,10 @@ class EnvironmentResponse(BaseModel):
     user_id: str
     created_at: datetime
     updated_at: Optional[datetime] = None
-    
+    workshop_count: Optional[int] = None
+    ttl_hours: Optional[int] = None
+    expires_at: Optional[datetime] = None
+
     class Config:
         from_attributes = True
 
@@ -35,7 +40,9 @@ class EnvironmentWithWorkshopsResponse(BaseModel):
     user_id: str
     created_at: datetime
     updated_at: Optional[datetime] = None
+    ttl_hours: Optional[int] = None
+    expires_at: Optional[datetime] = None
     workshops: Optional[List[dict]] = None
-    
+
     class Config:
         from_attributes = True

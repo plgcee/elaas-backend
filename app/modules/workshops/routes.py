@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from app.database.supabase_client import get_supabase
 from app.modules.workshops.schemas import WorkshopCreate, WorkshopUpdate, WorkshopResponse, WorkshopDeployRequest
 from app.modules.workshops.service import WorkshopService
 from app.modules.deployments.service import DeploymentService
 from app.modules.deployments.schemas import DeploymentCreate, DeploymentResponse
-from app.modules.deployments.deployment_worker import deploy_workshop_async
+from app.modules.deployments.executor import submit_deploy
 from app.modules.templates.service import TemplateService
 from app.core.dependencies import require_permission, get_current_user_id, get_access_cache, get_user_group_ids, check_workshop_access, is_super_user
 from supabase import Client
@@ -49,7 +49,6 @@ def _obfuscate_terraform_vars(vars_dict: Dict[str, Any]) -> Dict[str, Any]:
 @router.post("/{workshop_id}/deploy", response_model=DeploymentResponse, status_code=201)
 async def deploy_workshop(
     workshop_id: str,
-    background_tasks: BackgroundTasks,
     deploy_request: Optional[WorkshopDeployRequest] = None,
     user_data: Dict = Depends(require_permission("workshops:deploy")),
     workshop_service: WorkshopService = Depends(get_workshop_service),
@@ -103,8 +102,7 @@ async def deploy_workshop(
             deployment = deployment_service.create_deployment(deployment_data, user_data["id"])
             if first_deployment is None:
                 first_deployment = deployment
-            background_tasks.add_task(
-                deploy_workshop_async,
+            submit_deploy(
                 deployment_id=deployment.id,
                 workshop_id=workshop_id,
                 template_id=template_id,
@@ -129,8 +127,7 @@ async def deploy_workshop(
     )
     deployment = deployment_service.create_deployment(deployment_data, user_data["id"])
     workshop_service.update_workshop_status(workshop_id, "deploying")
-    background_tasks.add_task(
-        deploy_workshop_async,
+    submit_deploy(
         deployment_id=deployment.id,
         workshop_id=workshop_id,
         template_id=template_id,
