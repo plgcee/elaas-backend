@@ -88,12 +88,10 @@ app.include_router(template_groups_routes.router, prefix="/api/v1")
 @app.on_event("startup")
 async def startup_event():
     logger.info("Application startup")
-    
-    # # Start TTL scheduler for automatic workshop destruction
-    # from app.modules.workshops.ttl_scheduler import ttl_scheduler_loop
-    # import asyncio
-    # asyncio.create_task(ttl_scheduler_loop())
-    # logger.info("TTL scheduler started - will check for expired workshops every 5 minutes")
+    from app.modules.workshops.ttl_scheduler import ttl_scheduler_loop
+    import asyncio
+    asyncio.create_task(ttl_scheduler_loop())
+    logger.info("TTL scheduler started - will check for expired workshops and environments every %s seconds", settings.ttl_check_interval_seconds)
 
 
 @app.on_event("shutdown")
