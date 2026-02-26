@@ -18,8 +18,6 @@ Expected Supabase table structure:
 - status: text (not null, default: 'pending') - values: pending, deploying, deployed, failed, destroying
 - fargate_task_arn: text (nullable)
 - deployment_output: jsonb (nullable)
-- ttl_hours: number (nullable)
-- expires_at: timestamp (nullable)
 - created_at: timestamp (default: now())
 - updated_at: timestamp (nullable)
 """

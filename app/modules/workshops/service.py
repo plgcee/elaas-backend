@@ -2,7 +2,7 @@ from supabase import Client
 from app.modules.workshops.schemas import WorkshopCreate, WorkshopUpdate, WorkshopResponse
 from typing import List, Optional
 from fastapi import HTTPException
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
@@ -31,10 +31,6 @@ class WorkshopService:
     def create_workshop(self, workshop_data: WorkshopCreate, user_id: str) -> WorkshopResponse:
         """Create a new workshop (single-template or template-group)."""
         try:
-            # Calculate expiration time based on TTL
-            ttl_hours = workshop_data.ttl_hours or 48
-            expires_at = (datetime.utcnow() + timedelta(hours=ttl_hours)).isoformat()
-
             if workshop_data.template_group_id:
                 # Group workshop: validate group exists and has templates
                 group_result = self.supabase.table("template_groups").select("id").eq("id", workshop_data.template_group_id).maybe_single().execute()
@@ -49,8 +45,6 @@ class WorkshopService:
                     "user_id": user_id,
                     "terraform_vars": workshop_data.terraform_vars or {},
                     "status": "pending",
-                    "ttl_hours": ttl_hours,
-                    "expires_at": expires_at,
                 }
             else:
                 # Single-template workshop (legacy)
@@ -62,8 +56,6 @@ class WorkshopService:
                     "user_id": user_id,
                     "terraform_vars": workshop_data.terraform_vars or {},
                     "status": "pending",
-                    "ttl_hours": ttl_hours,
-                    "expires_at": expires_at,
                 }
 
             # Add environment_id if provided
@@ -132,11 +124,7 @@ class WorkshopService:
                 update_data["description"] = workshop_data.description
             if workshop_data.terraform_vars is not None:
                 update_data["terraform_vars"] = workshop_data.terraform_vars
-            if workshop_data.ttl_hours is not None:
-                # Recalculate expiration time if TTL is updated
-                update_data["ttl_hours"] = workshop_data.ttl_hours
-                update_data["expires_at"] = (datetime.utcnow() + timedelta(hours=workshop_data.ttl_hours)).isoformat()
-            
+
             result = self.supabase.table("workshops")\
                 .update(update_data)\
                 .eq("id", workshop_id)\
@@ -148,38 +136,7 @@ class WorkshopService:
             return WorkshopResponse(**result.data[0])
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-    
-    def get_expired_workshops(self) -> List[WorkshopResponse]:
-        """Get all workshops that have expired and need to be destroyed"""
-        try:
-            now = datetime.utcnow().isoformat()
-            # Get expired workshops that are deployed or failed (not already destroying/destroyed)
-            # Query for deployed status
-            result_deployed = self.supabase.table("workshops")\
-                .select("*")\
-                .lt("expires_at", now)\
-                .eq("status", "deployed")\
-                .execute()
-            
-            # Query for failed status
-            result_failed = self.supabase.table("workshops")\
-                .select("*")\
-                .lt("expires_at", now)\
-                .eq("status", "failed")\
-                .execute()
-            
-            # Combine results
-            workshops = []
-            if result_deployed.data:
-                workshops.extend(result_deployed.data)
-            if result_failed.data:
-                workshops.extend(result_failed.data)
-            
-            return [WorkshopResponse(**workshop) for workshop in workshops]
-        except Exception as e:
-            logger.error(f"Error getting expired workshops: {str(e)}")
-            return []
-    
+
     def update_workshop_status(self, workshop_id: str, status: str, fargate_task_arn: Optional[str] = None, deployment_output: Optional[dict] = None) -> Optional[WorkshopResponse]:
         """Update workshop deployment status. May return None if update succeeded but fetch of updated row failed."""
         try:

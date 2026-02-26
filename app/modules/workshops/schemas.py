@@ -1,6 +1,6 @@
 from pydantic import BaseModel, model_validator
 from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime
 
 
 class WorkshopCreate(BaseModel):
@@ -10,7 +10,6 @@ class WorkshopCreate(BaseModel):
     template_group_id: Optional[str] = None
     environment_id: Optional[str] = None
     terraform_vars: Optional[Dict[str, Any]] = None  # flat for single-template; keyed by template_id for group
-    ttl_hours: Optional[int] = 48  # Default 48 hours
 
     @model_validator(mode="after")
     def require_template_or_group(self):
@@ -25,7 +24,6 @@ class WorkshopUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     terraform_vars: Optional[Dict[str, Any]] = None
-    ttl_hours: Optional[int] = None
 
 
 class WorkshopResponse(BaseModel):
@@ -40,8 +38,6 @@ class WorkshopResponse(BaseModel):
     status: str
     fargate_task_arn: Optional[str] = None
     deployment_output: Optional[Dict[str, Any]] = None
-    ttl_hours: Optional[int] = 48
-    expires_at: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

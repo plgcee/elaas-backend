@@ -91,7 +91,7 @@ async def startup_event():
     from app.modules.workshops.ttl_scheduler import ttl_scheduler_loop
     import asyncio
     asyncio.create_task(ttl_scheduler_loop())
-    logger.info("TTL scheduler started - will check for expired workshops and environments every %s seconds", settings.ttl_check_interval_seconds)
+    logger.info("TTL scheduler started - will check for expired environments every %s seconds", settings.ttl_check_interval_seconds)
 
 
 @app.on_event("shutdown")

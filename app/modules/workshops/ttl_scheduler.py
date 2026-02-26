@@ -36,29 +36,14 @@ def _enqueue_destroys_for_workshop(workshop, workshop_service: WorkshopService, 
 
 
 async def check_and_destroy_expired_workshops():
-    """Check for expired workshops and expired environments; enqueue destroy jobs (non-blocking)."""
+    """Check for expired environments (TTL); enqueue destroy jobs for their workshops (non-blocking)."""
     try:
         supabase = get_supabase()
         workshop_service = WorkshopService(supabase)
         deployment_service = DeploymentService(supabase)
         environment_service = EnvironmentService(supabase)
 
-        # 1) Expired workshops (workshop-level TTL)
-        expired_workshops = workshop_service.get_expired_workshops()
-        if expired_workshops:
-            logger.info("Found %s expired workshop(s) to destroy", len(expired_workshops))
-        for workshop in expired_workshops:
-            try:
-                logger.info("Auto-destroying expired workshop: %s (expired at %s)", workshop.id, workshop.expires_at)
-                _enqueue_destroys_for_workshop(workshop, workshop_service, deployment_service)
-            except Exception as e:
-                logger.error("Error auto-destroying workshop %s: %s", workshop.id, e)
-                try:
-                    workshop_service.update_workshop_status(workshop.id, "failed")
-                except Exception:
-                    pass
-
-        # 2) Expired environments (environment-level TTL): destroy all workshops in env
+        # Expired environments (environment-level TTL): destroy all workshops in env
         expired_envs = environment_service.get_expired_environments()
         if expired_envs:
             logger.info("Found %s expired environment(s) to destroy", len(expired_envs))
@@ -83,7 +68,7 @@ async def check_and_destroy_expired_workshops():
 
 
 async def ttl_scheduler_loop():
-    """Background task that periodically checks for expired workshops and environments."""
+    """Background task that periodically checks for expired environments (TTL) and destroys their workshops."""
     while True:
         try:
             await check_and_destroy_expired_workshops()
