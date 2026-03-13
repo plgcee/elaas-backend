@@ -38,16 +38,16 @@ class EnvironmentService:
                     detail="You must be a member of this group to create an environment"
                 )
             
-            # Create environment
+            # Create environment (default TTL 48h)
+            ttl_hours = environment_data.ttl_hours if environment_data.ttl_hours is not None else 48
             insert_data = {
                 "name": environment_data.name,
                 "description": environment_data.description,
                 "group_id": environment_data.group_id,
                 "user_id": user_id,
+                "ttl_hours": ttl_hours,
+                "expires_at": (datetime.utcnow() + timedelta(hours=ttl_hours)).isoformat(),
             }
-            if environment_data.ttl_hours is not None:
-                insert_data["ttl_hours"] = environment_data.ttl_hours
-                insert_data["expires_at"] = (datetime.utcnow() + timedelta(hours=environment_data.ttl_hours)).isoformat()
             result = self.supabase.table("environments").insert(insert_data).execute()
             
             if not result.data:
