@@ -174,7 +174,22 @@ class WorkshopService:
         """List workshops. When accessible_environment_ids is set, only workshops in those environments or owned by current_user_id when no environment."""
         try:
             if accessible_environment_ids is not None:
-                # Workshops in user's groups' environments, or standalone (no env) owned by current user
+                # When environment_id is requested: only workshops in that env (and must be in accessible set)
+                if environment_id:
+                    if accessible_environment_ids and environment_id not in accessible_environment_ids:
+                        raise HTTPException(
+                            status_code=403,
+                            detail="You do not have access to this environment"
+                        )
+                    result = self.supabase.table("workshops")\
+                        .select("*")\
+                        .eq("environment_id", environment_id)\
+                        .order("created_at", desc=True)\
+                        .limit(limit)\
+                        .offset(offset)\
+                        .execute()
+                    return [WorkshopResponse(**w) for w in (result.data or [])]
+                # No environment_id: workshops in user's groups' environments, or standalone owned by current user
                 if not accessible_environment_ids and not current_user_id:
                     return []
                 results = []
@@ -193,7 +208,7 @@ class WorkshopService:
                         .order("created_at", desc=True)\
                         .execute()
                     results.extend(r2.data or [])
-                # Dedupe by id (workshop can't be in both), sort by created_at desc, then paginate
+                # Dedupe by id, sort by created_at desc, then paginate
                 seen = set()
                 unique = []
                 for w in sorted(results, key=lambda x: x.get("created_at") or "", reverse=True):
@@ -201,7 +216,7 @@ class WorkshopService:
                         seen.add(w["id"])
                         unique.append(w)
                 page = unique[offset:offset + limit]
-                return [WorkshopResponse(**workshop) for workshop in page]
+                return [WorkshopResponse(**w) for w in page]
             query = self.supabase.table("workshops").select("*")
             if user_id:
                 query = query.eq("user_id", user_id)
